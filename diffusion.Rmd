@@ -20,8 +20,41 @@ library(directlabels)
 library(RWiener)
 ```
 
-Read in adult data
+Fixing up the wiener_plot function to deal with missing data
 ```{r}
+wiener.plot <- function (dat) 
+{
+    rt = as.double(dat$q)
+    rc = as.numeric(as.factor(dat$resp))
+    dpos = tryCatch(density(rt[rc == 1], from = 0),error=function(e) NA)
+    dneg = tryCatch(density(rt[rc == 2], from = 0),error=function(e) NA)
+    maxt = max(pretty(max(rt)))
+    
+    maxd <- NA
+    if(is.na(dpos[1])){
+      maxd <- max(dneg$y)
+      } else if(is.na(dneg[1])){
+        maxd <- max(dpos$y)
+        } else {
+          maxd <- max(dpos$y, dneg$y)
+          }
+    
+    par(mar = c(0, 5, 0, 0), mfcol = c(2, 1), ask = FALSE)
+    plot(dpos, xlim = c(0, maxt), ylim = c(0, maxd), las = 2, 
+        lwd = 2, col = "green3", main = "", ylab = "", ask = FALSE)
+    rug(rt[rc == 1], col = "green3")
+    mtext("Density of positive responses", side = 2, line = 4, 
+        cex = 0.8)
+    plot(dneg, xlim = c(0, maxt), ylim = c(maxd, 0), las = 2, 
+        lwd = 2, col = "red", main = "", ylab = "", ask = FALSE)
+    mtext("Density of negative responses", side = 2, line = 4, 
+        cex = 0.8)
+    rug(rt[rc == 2], col = "red", side = 3)
+}
+```
+
+Read in adult data
+```{r,fig.height=3,fig.width=4.5}
 data <- read.csv('150105-simpimpsc-turk_complete.csv') %>%
   filter(trialtype %in% c("control_double", "inference")) %>%
   group_by(WorkerId,trialnum) %>%
@@ -39,17 +72,26 @@ control.2v1.data <- filter(data,trialtype == "control_double",itemnum=="2vs1") %
   select(q,resp) %>%
   as.data.frame
 
+wiener.plot(control.2v1.data)
+
 control.3v1.data <- filter(data,trialtype == "control_double",itemnum=="3vs1") %>%
   select(q,resp) %>%
   as.data.frame
+
+wiener.plot(control.3v1.data)
 
 inference.2v1.data <- filter(data,trialtype == "inference",itemnum=="2vs1") %>%
   select(q,resp) %>%
   as.data.frame
 
+wiener.plot(inference.2v1.data)
+
 inference.3v1.data <- filter(data,trialtype == "inference",itemnum=="3vs1") %>%
   select(q,resp) %>%
   as.data.frame
+
+wiener.plot(inference.3v1.data)
+
 ```
 
 Compute parameters for each condition separately
@@ -105,44 +147,104 @@ joint.pars %<>% select(Separation,Non.Decision,Bias,Drift,Condition,Item.Num) %>
 print(joint.pars)
 ```
 
+```{r,fig.height=3,fig.width=4.5}
+kid.data <- read.csv('simpimpSCresults_141209_1.csv') %>%
+  filter(trialtype %in% c("control_double", "inference")) %>%
+  group_by(subid,trialnum) %>%
+  mutate(side = if((trialtype == "control_double") & (correct == "Y")) "more"
+         else if((trialtype == "control_double") & (correct == "N")) "less"
+         else if((trialtype == "inference") & (correct == "N")) "more"
+         else "less") %>%
+  mutate(resp = as.character(factor(side,levels=c("more","less"),
+                                    labels=c("upper","lower")))) %>%
+  mutate(q = reaction.rt/1000) %>%
+  group_by() %>%
+  select(q,trialtype,itemnum,resp) 
+
+
+kid.control.2v1.data <- filter(kid.data,trialtype == "control_double",
+                               itemnum=="2vs1") %>%
+  select(q,resp) %>%
+  as.data.frame
+
+wiener.plot(kid.control.2v1.data)
+
+kid.control.3v1.data <- filter(kid.data,trialtype == "control_double",
+                               itemnum=="3vs1") %>%
+  select(q,resp) %>%
+  as.data.frame
+
+wiener.plot(kid.control.3v1.data)
+
+kid.inference.2v1.data <- filter(kid.data,trialtype == "inference",
+                                 itemnum=="2vs1") %>%
+  select(q,resp) %>%
+  as.data.frame
+
+wiener.plot(kid.inference.2v1.data)
+
+kid.inference.3v1.data <- filter(kid.data,trialtype == "inference",
+                                 itemnum=="3vs1") %>%
+  select(q,resp) %>%
+  as.data.frame
+
+wiener.plot(kid.inference.2v1.data)
+```
+
+Compute kid parameters for each condition separately
 ```{r}
-# kid.data <- read.csv('simpimpSCresults_141209_1.csv') %>%
-#   filter(trialtype %in% c("control_double", "inference")) %>%
-#   group_by(subid,trialnum) %>%
-#   mutate(side = if((trialtype == "control_double") & (correct == "Y")) "more"
-#          else if((trialtype == "control_double") & (correct == "N")) "less"
-#          else if((trialtype == "inference") & (correct == "N")) "more"
-#          else "less") %>%
-#   mutate(resp= factor(side,levels=c("more","less"),
-#                                  labels=c("upper","lower"))) %>%
-#   select(subid,trialtype,trialnum,side,resp,reaction.rt)
-# 
-# 
-# kid.control.data <- filter(kid.data,trialtype == "control_double") %>%
-#   rename(q = reaction.rt) %>%
-#   mutate(q = q/1000) %>%
-#   mutate(resp = as.character(resp)) %>%
-#   group_by() %>%
-#   select(q,resp) %>%
-#   as.data.frame
-# 
-# kid.inference.data <- filter(kid.data,trialtype == "inference") %>%
-#   rename(q = reaction.rt) %>%
-#   mutate(q = q/1000) %>%
-#   mutate(resp = as.character(resp)) %>%
-#   group_by() %>%
-#   select(q,resp) %>%
-#   as.data.frame
-# 
-# kid.optim1 <- optim(c(1, .1, .1, 1), wiener_deviance, 
-#                     dat=kid.control.data, method="Nelder-Mead")
-# kid.optim2 <- optim(c(1, .1, .1, 1), wiener_deviance, 
-#                     dat=kid.inference.data, method="Nelder-Mead")
-# 
-# wiener_plot(dat)
-# 
-# ```
-# ```{r}
+kid.optim.control.2v1 <- optim(c(1, .1, .1, 1), wiener_deviance, 
+                           dat=kid.control.2v1.data, method="Nelder-Mead")
+
+kid.optim.control.3v1 <- optim(c(1, .1, .1, 1), wiener_deviance, 
+                           dat=kid.control.3v1.data, method="Nelder-Mead")
+
+kid.optim.inference.2v1 <- optim(c(1, .1, .1, 1), wiener_deviance, 
+                           dat=kid.inference.2v1.data, method="Nelder-Mead")
+
+kid.optim.inference.3v1 <- optim(c(1, .1, .1, 1), wiener_deviance, 
+                           dat=kid.inference.3v1.data, method="Nelder-Mead")
+
+kid.indiv.pars <- as.data.frame(rbind(kid.optim.control.2v1$par,
+                                      kid.optim.control.3v1$par,
+                                      kid.optim.inference.2v1$par,
+                                      kid.optim.inference.3v1$par))
+names(kid.indiv.pars) <- c("Separation","Non.Decision","Bias","Drift")
+kid.indiv.pars$Condition <- c("Control", "Control", "Inference", "Inference")
+kid.indiv.pars$Item.Num<- c(2, 3, 2, 3)
+
+print(indiv.pars)
+
+print(kid.indiv.pars)
+```
+
+Pin parameters for item.num together
+```{r}
+# Function for tying parameters together across conditions
+kid.datlist.2v1 <- list(kid.control.2v1.data, kid.inference.2v1.data)
+kid.datlist.3v1 <- list(kid.control.3v1.data, kid.inference.3v1.data)
+# use nlm to estimate parameters
+kid.optim.2v1 <- optim(p=c(1, .1, .1, 1, 1), many_drifts, 
+                   dat=kid.datlist.2v1,method="Nelder-Mead")
+kid.optim.3v1 <- optim(p=c(1, .1, .1, 1, 1), many_drifts, 
+                   dat=kid.datlist.3v1,method="Nelder-Mead")
+
+kid.joint.pars <- as.data.frame(rbind(kid.optim.2v1$par,kid.optim.3v1$par))
+names(kid.joint.pars) <- c("Separation","Non.Decision","Bias",
+                       "Control", "Inference")
+kid.joint.pars <- gather(kid.joint.pars,Condition,Drift,Control:Inference)
+kid.joint.pars$Item.Num <- c(2,3,2,3)
+kid.joint.pars %<>% select(Separation,Non.Decision,Bias,Drift,
+                           Condition,Item.Num) %>%
+  arrange(Condition,Item.Num)
+
+print(joint.pars)
+
+print(kid.joint.pars)
+```
+
+Some copy/pasted code from the paper
+```{r}
 # 
 # set.seed(0)
 # dat <- rwiener(n=100, alpha=2, tau=.3, beta=.5, delta=.5)
@@ -173,5 +275,4 @@ print(joint.pars)
 # # create a second data set and a list containing both data sets
 # dat2 <- rwiener(n=100, alpha=2, tau=.3, beta=.5, delta=1)
 # 
-
 ```
