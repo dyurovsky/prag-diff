@@ -1,0 +1,177 @@
+---
+title: "Diffusion Models of Pragmatic Inference Tasks"
+author: "Dan Yurovsky & Erica Yoon"
+date: "January 07, 2014"
+output: html_document
+---
+`r library(knitr)`
+`r opts_chunk$set(message=FALSE, warning=FALSE)`
+
+## Data Loading
+
+Load required Libraries
+```{r}
+rm(list=ls())
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(magrittr)
+library(directlabels)
+library(RWiener)
+```
+
+Read in adult data
+```{r}
+data <- read.csv('150105-simpimpsc-turk_complete.csv') %>%
+  filter(trialtype %in% c("control_double", "inference")) %>%
+  group_by(WorkerId,trialnum) %>%
+  mutate(side = if((trialtype == "control_double") & (correct == "Y")) "more"
+         else if((trialtype == "control_double") & (correct == "N")) "less"
+         else if((trialtype == "inference") & (correct == "N")) "more"
+         else "less") %>%
+  mutate(resp = as.character(factor(side,levels=c("more","less"),
+                                    labels=c("upper","lower")))) %>%
+  mutate(q = rt/1000) %>%
+  group_by() %>%
+  select(q,trialtype,itemnum,resp) 
+
+control.2v1.data <- filter(data,trialtype == "control_double",itemnum=="2vs1") %>%
+  select(q,resp) %>%
+  as.data.frame
+
+control.3v1.data <- filter(data,trialtype == "control_double",itemnum=="3vs1") %>%
+  select(q,resp) %>%
+  as.data.frame
+
+inference.2v1.data <- filter(data,trialtype == "inference",itemnum=="2vs1") %>%
+  select(q,resp) %>%
+  as.data.frame
+
+inference.3v1.data <- filter(data,trialtype == "inference",itemnum=="3vs1") %>%
+  select(q,resp) %>%
+  as.data.frame
+```
+
+Compute parameters for each condition separately
+```{r}
+optim.control.2v1 <- optim(c(1, .1, .1, 1), wiener_deviance, 
+                           dat=control.2v1.data, method="Nelder-Mead")
+
+optim.control.3v1 <- optim(c(1, .1, .1, 1), wiener_deviance, 
+                           dat=control.3v1.data, method="Nelder-Mead")
+
+optim.inference.2v1 <- optim(c(1, .1, .1, 1), wiener_deviance, 
+                           dat=inference.2v1.data, method="Nelder-Mead")
+
+optim.inference.3v1 <- optim(c(1, .1, .1, 1), wiener_deviance, 
+                           dat=inference.3v1.data, method="Nelder-Mead")
+
+indiv.pars <- as.data.frame(rbind(optim.control.2v1$par,optim.control.3v1$par,
+                                  optim.inference.2v1$par,optim.inference.3v1$par))
+names(indiv.pars) <- c("Separation","Non.Decision","Bias","Drift")
+indiv.pars$Condition <- c("Control", "Control", "Inference", "Inference")
+indiv.pars$Item.Num<- c(2, 3, 2, 3)
+print(indiv.pars)
+```
+
+Pin parameters for item.num together
+```{r}
+# Function for tying parameters together across conditions
+many_drifts <- function(x, datlist) {
+  l = 0
+  for (c in 1:length(datlist)) {
+    l = l + wiener_deviance(x[c(1, 2, 3, c+3)], datlist[[c]])
+  }
+  
+  return(l)
+}
+
+datlist.2v1 <- list(control.2v1.data, inference.2v1.data)
+datlist.3v1 <- list(control.3v1.data, inference.3v1.data)
+# use nlm to estimate parameters
+optim.2v1 <- optim(p=c(1, .1, .1, 1, 1), many_drifts, 
+                   dat=datlist.2v1,method="Nelder-Mead")
+optim.3v1 <- optim(p=c(1, .1, .1, 1, 1), many_drifts, 
+                   dat=datlist.3v1,method="Nelder-Mead")
+
+joint.pars <- as.data.frame(rbind(optim.2v1$par,optim.3v1$par))
+names(joint.pars) <- c("Separation","Non.Decision","Bias",
+                       "Control", "Inference")
+joint.pars <- gather(joint.pars,Condition,Drift,Control:Inference)
+joint.pars$Item.Num <- c(2,3,2,3)
+joint.pars %<>% select(Separation,Non.Decision,Bias,Drift,Condition,Item.Num) %>%
+  arrange(Condition,Item.Num)
+
+print(joint.pars)
+```
+
+```{r}
+# kid.data <- read.csv('simpimpSCresults_141209_1.csv') %>%
+#   filter(trialtype %in% c("control_double", "inference")) %>%
+#   group_by(subid,trialnum) %>%
+#   mutate(side = if((trialtype == "control_double") & (correct == "Y")) "more"
+#          else if((trialtype == "control_double") & (correct == "N")) "less"
+#          else if((trialtype == "inference") & (correct == "N")) "more"
+#          else "less") %>%
+#   mutate(resp= factor(side,levels=c("more","less"),
+#                                  labels=c("upper","lower"))) %>%
+#   select(subid,trialtype,trialnum,side,resp,reaction.rt)
+# 
+# 
+# kid.control.data <- filter(kid.data,trialtype == "control_double") %>%
+#   rename(q = reaction.rt) %>%
+#   mutate(q = q/1000) %>%
+#   mutate(resp = as.character(resp)) %>%
+#   group_by() %>%
+#   select(q,resp) %>%
+#   as.data.frame
+# 
+# kid.inference.data <- filter(kid.data,trialtype == "inference") %>%
+#   rename(q = reaction.rt) %>%
+#   mutate(q = q/1000) %>%
+#   mutate(resp = as.character(resp)) %>%
+#   group_by() %>%
+#   select(q,resp) %>%
+#   as.data.frame
+# 
+# kid.optim1 <- optim(c(1, .1, .1, 1), wiener_deviance, 
+#                     dat=kid.control.data, method="Nelder-Mead")
+# kid.optim2 <- optim(c(1, .1, .1, 1), wiener_deviance, 
+#                     dat=kid.inference.data, method="Nelder-Mead")
+# 
+# wiener_plot(dat)
+# 
+# ```
+# ```{r}
+# 
+# set.seed(0)
+# dat <- rwiener(n=100, alpha=2, tau=.3, beta=.5, delta=.5)
+# 
+# dat2 <- rwiener(n=100, alpha=2, tau=.3, beta=.5, delta=.75)
+# 
+# dwiener(dat$q[1], alpha=2, tau=.3, beta=.5, delta=.5, resp=dat$resp[1], give_log=FALSE)
+# 
+# curve(dwiener(x, 2, .3, .5, .5, rep("upper", length(x))),
+# xlim=c(0,3), main="Density of upper responses",
+# ylab="density", xlab="quantile")
+# 
+# pwiener(dat$q[1], alpha=2, tau=.3, beta=.5, delta=.5, resp=dat$resp[1])
+# 
+# wiener_plot(control.data)
+# 
+# x <- c(2, .3, .5, .5)
+# wiener_likelihood(x=x, dat=dat)
+# wiener_deviance(x=x, dat=control.data)
+# wiener_aic(x=x, dat=dat)
+# wiener_bic(x=x, dat=dat)
+# 
+# # using optim, first with Nelder-Mead algorithm, then with BFGS
+# optim1 <- optim(c(1, .1, .1, 1), wiener_deviance, dat=dat, method="Nelder-Mead")
+# optim2 <- optim(optim1[["par"]], wiener_deviance, dat=dat, method="BFGS", hessian=TRUE)
+# # using nlm, which uses a Newton-type algorithm
+
+# # create a second data set and a list containing both data sets
+# dat2 <- rwiener(n=100, alpha=2, tau=.3, beta=.5, delta=1)
+# 
+
+```
