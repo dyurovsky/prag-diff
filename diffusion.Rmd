@@ -68,6 +68,15 @@ data <- read.csv('150105-simpimpsc-turk_complete.csv') %>%
   group_by() %>%
   select(q,trialtype,itemnum,resp) 
 
+# filter rt, remove rt outside of stdev*2
+data <- data %>%
+      mutate(include_good_rt = ifelse(log(q) > mean(log(q)) + 2 * sd(log(q)) |
+                                            log(q) < mean(log(q)) - 2 * sd(log(q)),
+                                      0,1))
+data <- filter(data,  include_good_rt == 1) %>%
+  select(q,trialtype,itemnum,resp)
+
+
 control.2v1.data <- filter(data,trialtype == "control_double",itemnum=="2vs1") %>%
   select(q,resp) %>%
   as.data.frame
@@ -160,6 +169,14 @@ kid.data <- read.csv('simpimpSCresults_141209_1.csv') %>%
   mutate(q = reaction.rt/1000) %>%
   group_by() %>%
   select(q,trialtype,itemnum,resp) 
+
+# filter rt, remove rt outside of stdev*2
+kid.data <- kid.data %>%
+      mutate(include_good_rt = ifelse(log(q) > mean(log(q)) + 2 * sd(log(q)) |
+                                            log(q) < mean(log(q)) - 2 * sd(log(q)),
+                                      0,1))
+kid.data <- filter(kid.data,  include_good_rt == 1) %>%
+  select(q,trialtype,itemnum,resp)
 
 
 kid.control.2v1.data <- filter(kid.data,trialtype == "control_double",
