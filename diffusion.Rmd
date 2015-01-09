@@ -66,41 +66,38 @@ data <- read.csv('150105-simpimpsc-turk_complete.csv') %>%
                                     labels=c("upper","lower")))) %>%
   mutate(q = rt/1000) %>%
   group_by() %>%
-  select(q,trialtype,itemnum,resp) 
+  select(q,trialtype,itemnum,resp) %>%
+  # filter rt, remove rt outside of stdev*2
+  filter(log(q) < mean(log(q)) + 2 * sd(log(q)),
+         log(q) > mean(log(q)) - 2 * sd(log(q))) 
 
-# filter rt, remove rt outside of stdev*2
-data <- data %>%
-      mutate(include_good_rt = ifelse(log(q) > mean(log(q)) + 2 * sd(log(q)) |
-                                            log(q) < mean(log(q)) - 2 * sd(log(q)),
-                                      0,1))
-data <- filter(data,  include_good_rt == 1) %>%
-  select(q,trialtype,itemnum,resp)
-
-
-control.2v1.data <- filter(data,trialtype == "control_double",itemnum=="2vs1") %>%
+control.2v1.data <- filter(data,trialtype == "control_double",
+                           itemnum=="2vs1") %>%
   select(q,resp) %>%
   as.data.frame
 
 wiener.plot(control.2v1.data)
 
-control.3v1.data <- filter(data,trialtype == "control_double",itemnum=="3vs1") %>%
+control.3v1.data <- filter(data,trialtype == "control_double",
+                           itemnum=="3vs1") %>%
   select(q,resp) %>%
   as.data.frame
 
 wiener.plot(control.3v1.data)
 
-inference.2v1.data <- filter(data,trialtype == "inference",itemnum=="2vs1") %>%
+inference.2v1.data <- filter(data,trialtype == "inference",
+                             itemnum=="2vs1") %>%
   select(q,resp) %>%
   as.data.frame
 
 wiener.plot(inference.2v1.data)
 
-inference.3v1.data <- filter(data,trialtype == "inference",itemnum=="3vs1") %>%
+inference.3v1.data <- filter(data,trialtype == "inference",
+                             itemnum=="3vs1") %>%
   select(q,resp) %>%
   as.data.frame
 
 wiener.plot(inference.3v1.data)
-
 ```
 
 Compute parameters for each condition separately
@@ -117,8 +114,10 @@ optim.inference.2v1 <- optim(c(1, .1, .1, 1), wiener_deviance,
 optim.inference.3v1 <- optim(c(1, .1, .1, 1), wiener_deviance, 
                            dat=inference.3v1.data, method="Nelder-Mead")
 
-indiv.pars <- as.data.frame(rbind(optim.control.2v1$par,optim.control.3v1$par,
-                                  optim.inference.2v1$par,optim.inference.3v1$par))
+indiv.pars <- as.data.frame(rbind(optim.control.2v1$par,
+                                  optim.control.3v1$par,
+                                  optim.inference.2v1$par,
+                                  optim.inference.3v1$par))
 names(indiv.pars) <- c("Separation","Non.Decision","Bias","Drift")
 indiv.pars$Condition <- c("Control", "Control", "Inference", "Inference")
 indiv.pars$Item.Num<- c(2, 3, 2, 3)
@@ -150,10 +149,78 @@ names(joint.pars) <- c("Separation","Non.Decision","Bias",
                        "Control", "Inference")
 joint.pars <- gather(joint.pars,Condition,Drift,Control:Inference)
 joint.pars$Item.Num <- c(2,3,2,3)
-joint.pars %<>% select(Separation,Non.Decision,Bias,Drift,Condition,Item.Num) %>%
+joint.pars %<>% select(Separation,Non.Decision,Bias,
+                       Drift,Condition,Item.Num) %>%
   arrange(Condition,Item.Num)
 
 print(joint.pars)
+```
+
+Pin non-decision time for a group, pin boundaries and bias within a condition
+```{r}
+# Function for tying parameters together across conditions
+multi.loss.func <- function(x, datmat) {
+  l = 0
+  num.conds <- length(datmat)
+  num.types <- length(datmat[[1]])
+  
+  # model takes (sep, non-decision, bias, drift)
+  
+  # x has (non-decision, sep-1, bias-1, drift-11, drift-12,
+  #                      sep-2, bias-2, drift-21, drift-22)
+
+  for (cond in 1:num.conds) {
+    for(type in 1:num.types){
+
+      l = l + wiener_deviance(x[c(2+(cond-1)*(2+num.types), 1, 
+                                  3+(cond-1)*(2+num.types), 
+                                  3+(cond-1)*(2+num.types)+type)], 
+                              datmat[[cond]][[type]])
+    }
+  }
+  
+  return(l)
+}
+
+#Function for reconstructing the parameter matrix
+make.par.mat <- function(optim.output) {
+  pars <- as.data.frame(t(optim.output$par))
+  names(pars) <- c("NonDecision","Separation.2v1","Bias.2v1",
+                   "Drift.Control.2v1","Drift.Inference.2v1",
+                   "Separation.3v1","Bias.3v1",
+                   "Drift.Control.3v1","Drift.Inference.3v1")
+
+  par.mat <- expand.grid(Condition = c("2v1", "3v1"),
+                         Trial.Type = c("Control", "Inference"))
+  
+  par.mat$NonDecision <- pars[,"NonDecision"]
+  par.mat$Separation <- rep(c(pars[,"Separation.2v1"],
+                              pars[,"Separation.3v1"]))
+  par.mat$Bias <- rep(c(pars[,"Bias.2v1"],
+                        pars[,"Bias.3v1"]))
+  par.mat$Drift <- c(pars[,"Drift.Control.2v1"],
+                     pars[,"Drift.Control.3v1"],
+                     pars[,"Drift.Inference.2v1"],
+                     pars[,"Drift.Inference.3v1"])
+  
+  return(par.mat)
+}
+```
+
+```{r}
+datlist.2v1 <- list(control.2v1.data, inference.2v1.data)
+datlist.3v1 <- list(control.3v1.data, inference.3v1.data)
+datmat <- list(datlist.2v1,datlist.3v1)
+
+  # x has (non-decision, sep-1, bias-1, drift-11, drift-12,
+  #                      sep-2, bias-2, drift-21, drift-22)
+
+optim.adult <- optim(p=c(.1, 1,.5, 1, -1, 1, .5, 1, -1), multi.loss.func, 
+                   dat=datmat,method="BFGS")
+
+adult.pars <- make.par.mat(optim.adult)
+
+print(adult.pars)
 ```
 
 ```{r,fig.height=3,fig.width=4.5}
@@ -168,16 +235,10 @@ kid.data <- read.csv('simpimpSCresults_141209_1.csv') %>%
                                     labels=c("upper","lower")))) %>%
   mutate(q = reaction.rt/1000) %>%
   group_by() %>%
-  select(q,trialtype,itemnum,resp) 
-
-# filter rt, remove rt outside of stdev*2
-kid.data <- kid.data %>%
-      mutate(include_good_rt = ifelse(log(q) > mean(log(q)) + 2 * sd(log(q)) |
-                                            log(q) < mean(log(q)) - 2 * sd(log(q)),
-                                      0,1))
-kid.data <- filter(kid.data,  include_good_rt == 1) %>%
-  select(q,trialtype,itemnum,resp)
-
+  select(q,trialtype,itemnum,resp) %>%
+  # filter rt, remove rt outside of stdev*2
+  filter(log(q) < mean(log(q)) + 2 * sd(log(q)),
+         log(q) > mean(log(q)) - 2 * sd(log(q)))
 
 kid.control.2v1.data <- filter(kid.data,trialtype == "control_double",
                                itemnum=="2vs1") %>%
@@ -205,7 +266,7 @@ kid.inference.3v1.data <- filter(kid.data,trialtype == "inference",
   select(q,resp) %>%
   as.data.frame
 
-wiener.plot(kid.inference.2v1.data)
+wiener.plot(kid.inference.3v1.data)
 ```
 
 Compute kid parameters for each condition separately
@@ -255,9 +316,25 @@ kid.joint.pars %<>% select(Separation,Non.Decision,Bias,Drift,
                            Condition,Item.Num) %>%
   arrange(Condition,Item.Num)
 
-print(joint.pars)
-
 print(kid.joint.pars)
+```
+
+```{r}
+kid.datlist.2v1 <- list(kid.control.2v1.data, kid.inference.2v1.data)
+kid.datlist.3v1 <- list(kid.control.3v1.data, kid.inference.3v1.data)
+kid.datmat <- list(kid.datlist.2v1,kid.datlist.3v1)
+
+  # x has (non-decision, sep-1, bias-1, drift-11, drift-12,
+  #                      sep-2, bias-2, drift-21, drift-22)
+
+optim.kid <- optim(p=c(.1, 1,.5, 1, -1, 1, .5, 1, -1), multi.loss.func, 
+                   dat=kid.datmat,method="BFGS")
+
+kid.pars <- make.par.mat(optim.kid)
+
+print(kid.pars)
+
+print(adult.pars)
 ```
 
 Some copy/pasted code from the paper
